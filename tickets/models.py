@@ -13,6 +13,11 @@ class Ticket(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     is_open = models.BooleanField(default=True)
+    # audit fields
+    closed_by = models.ForeignKey('auth.User', related_name='closed_tickets', on_delete=models.SET_NULL, null=True, blank=True)
+    closed_at = models.DateTimeField(null=True, blank=True)
+    reopened_by = models.ForeignKey('auth.User', related_name='reopened_tickets', on_delete=models.SET_NULL, null=True, blank=True)
+    reopened_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return f"{self.title} ({self.uid})"

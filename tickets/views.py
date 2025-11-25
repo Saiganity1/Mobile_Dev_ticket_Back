@@ -2,6 +2,7 @@ from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
 from .models import Ticket, Message
+from django.db.models import Q
 from .serializers import TicketSerializer, MessageSerializer, TicketAdminSerializer
 from django.contrib.auth.models import User
 from rest_framework.authtoken.models import Token
@@ -128,7 +129,20 @@ class MyTicketListView(generics.ListAPIView):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        qs = Ticket.objects.filter(user=self.request.user)
+        # Primary: tickets explicitly linked to user
+        user = self.request.user
+        qs = Ticket.objects.filter(user=user)
+        # Fallback: if some tickets were submitted before authentication and are orphaned,
+        # include tickets that match user's first and last name (case-insensitive).
+        try:
+            fn = (user.first_name or '').strip()
+            ln = (user.last_name or '').strip()
+            if fn or ln:
+                name_q = Q(first_name__iexact=fn) & Q(last_name__iexact=ln)
+                qs = Ticket.objects.filter(Q(user=user) | name_q)
+        except Exception:
+            # if user has no names set or other issue, keep only linked tickets
+            qs = Ticket.objects.filter(user=user)
         is_open = self.request.query_params.get('is_open')
         if is_open is not None:
             # treat 'true' (case-insensitive) and '1' as true
@@ -187,12 +201,18 @@ def admin_ticket_action(request, uid):
     action = request.data.get('action')
     if action == 'close':
         ticket.is_open = False
+        ticket.closed_by = request.user
+        from django.utils import timezone
+        ticket.closed_at = timezone.now()
         ticket.save()
-        return Response({'status': 'closed'})
+        return Response({'status': 'closed', 'closed_by': request.user.username, 'closed_at': ticket.closed_at})
     elif action == 'reopen':
         ticket.is_open = True
+        ticket.reopened_by = request.user
+        from django.utils import timezone
+        ticket.reopened_at = timezone.now()
         ticket.save()
-        return Response({'status': 'reopened'})
+        return Response({'status': 'reopened', 'reopened_by': request.user.username, 'reopened_at': ticket.reopened_at})
     elif action == 'assign':
         uid_user = request.data.get('assign_user_id')
         if not uid_user:
@@ -244,7 +264,27 @@ class MessageCreateView(generics.CreateAPIView):
         elif not ticket_id:
             return Response({'detail': 'ticket or ticket_uid is required'}, status=status.HTTP_400_BAD_REQUEST)
 
-        if not request.data.get('sender') or not request.data.get('content'):
+        sender = request.data.get('sender')
+        content = request.data.get('content')
+        if not sender or not content:
             return Response({'detail': 'sender and content are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # enforce ticket open/closed rules: users cannot post to closed tickets
+        try:
+            t = Ticket.objects.get(id=request.data.get('ticket'))
+        except Exception:
+            t = None
+
+        if sender.lower() == 'user':
+            if t is not None and not t.is_open:
+                return Response({'detail': 'Ticket is closed; user cannot post new messages.'}, status=status.HTTP_403_FORBIDDEN)
+
+        # only admins may post messages marked as 'admin'
+        if sender.lower() == 'admin':
+            if not (request.user and (request.user.is_staff or request.user.is_superuser)):
+                return Response({'detail': 'Only admin users may send messages as admin.'}, status=status.HTTP_403_FORBIDDEN)
+            # also prevent admins from posting to tickets that have been closed
+            if t is not None and not t.is_open:
+                return Response({'detail': 'Ticket is closed; admin cannot post new messages.'}, status=status.HTTP_403_FORBIDDEN)
 
         return super().create(request, *args, **kwargs)
