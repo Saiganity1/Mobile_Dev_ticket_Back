@@ -245,6 +245,7 @@ def ticket_receipt(request, id):
         "last_name": data.get("last_name"),
         "title": data.get("title"),
         "description": data.get("description"),
+    "is_open": ticket.is_open,
         "created_at": data.get("created_at"),
     }
     return Response(receipt)
@@ -300,62 +301,151 @@ def ticket_receipt_pdf(request, id):
         if qfn != (ticket.first_name or "").strip().lower() or qln != (ticket.last_name or "").strip().lower():
             return Response({"detail": "Name did not match the ticket owner."}, status=status.HTTP_403_FORBIDDEN)
 
-    # If browser requested HTML, render an e-receipt with a hidden form to download PDF
-    accepts = request.META.get("HTTP_ACCEPT", "")
-    if "text/html" in accepts:
-        solved = "Solved" if not ticket.is_open else "Not solved"
-        created = ticket.created_at.isoformat() if hasattr(ticket.created_at, "isoformat") else str(ticket.created_at)
-        posted_fn = (request.data.get("first_name") if hasattr(request, "data") else "") or pre_fn
-        posted_ln = (request.data.get("last_name") if hasattr(request, "data") else "") or pre_ln
-        html = f"""
-        <html><body>
-        <h2>Ticket E-Receipt</h2>
-        <div style="border:1px solid #ccc;padding:12px;max-width:700px;">
-          <p><strong>Ticket #:</strong> {ticket.ticket_number or ticket.id}</p>
-          <p><strong>Issue:</strong> {ticket.title}</p>
-          <p><strong>Description:</strong><br/>{(ticket.description or "").replace('\n','<br/>')}</p>
-          <p><strong>Name:</strong> {ticket.first_name} {ticket.last_name}</p>
-          <p><strong>Created:</strong> {created}</p>
-          <p><strong>Problem status:</strong> {solved}</p>
-          <form method="post">
-            <input type="hidden" name="first_name" value="{posted_fn}" />
-            <input type="hidden" name="last_name" value="{posted_ln}" />
-            <button type="submit">Download PDF</button>
-          </form>
-        </div>
-        </body></html>
-        """
-        return HttpResponse(html)
+        # If browser requested HTML, render an e-receipt with a hidden form to download PDF
+        accepts = request.META.get("HTTP_ACCEPT", "")
+        if "text/html" in accepts:
+                # friendly status label
+                status_text = "Solved" if not ticket.is_open else "Currently Solving"
+                status_color = "#22c55e" if not ticket.is_open else "#fb923c"
+                created = ticket.created_at.isoformat() if hasattr(ticket, "isoformat") else str(ticket.created_at)
+                posted_fn = (request.data.get("first_name") if hasattr(request, "data") else "") or pre_fn
+                posted_ln = (request.data.get("last_name") if hasattr(request, "data") else "") or pre_ln
+
+                        # Modern, mobile-friendly compact receipt HTML (single-page friendly)
+                html = f"""
+                <!doctype html>
+                <html>
+                <head>
+                    <meta name="viewport" content="width=device-width,initial-scale=1" />
+                    <style>
+                                body {{ font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; background:#fff; padding:10px; color:#0f172a }}
+                                .receipt {{ width:100%; max-width:520px; margin:0 auto; background:#fff; border-radius:6px; box-shadow:none; overflow:hidden; border:1px solid #e6edf3 }}
+                                .header {{ background:#0f172a; color:#fff; padding:12px 14px }}
+                                .brand {{ font-size:16px; font-weight:700 }}
+                                .meta {{ display:flex; justify-content:space-between; align-items:center; margin-top:6px }}
+                                .status {{ padding:4px 8px; border-radius:999px; color:#fff; font-weight:700; font-size:12px }}
+                                .body {{ padding:12px 14px; color:#0f172a; font-size:13px }}
+                                .row {{ margin-bottom:8px }}
+                                .label {{ color:#64748b; font-size:12px }}
+                                .value {{ font-weight:700; margin-top:2px }}
+                                .desc {{ white-space:pre-wrap; margin-top:6px; color:#334155; font-size:12px }}
+                                .actions {{ padding:10px 14px; border-top:1px solid #eef2f7; display:flex; gap:8px }}
+                                .btn {{ flex:1; background:#0f172a; color:#fff; padding:8px 10px; border-radius:6px; text-align:center; text-decoration:none; font-weight:700; font-size:13px }}
+                                .btn.secondary {{ background:#e2e8f0; color:#0f172a }}
+                    </style>
+                </head>
+                <body>
+                    <div class="receipt">
+                                <div class="header">
+                                    <div class="brand">Chat Support System</div>
+                            <div class="meta">
+                                <div style="font-size:13px">Ticket #{ticket.ticket_number or ticket.id}</div>
+                                <div class="status" style="background:{status_color}">{status_text}</div>
+                            </div>
+                        </div>
+                        <div class="body">
+                            <div class="row">
+                                <div class="label">Reported by</div>
+                                <div class="value">{ticket.first_name} {ticket.last_name} {('(' + ticket.user.username + ')') if getattr(ticket, 'user', None) else ''}</div>
+                            </div>
+                            <div class="row">
+                                <div class="label">Issue</div>
+                                <div class="value">{ticket.title}</div>
+                            </div>
+                            <div class="row">
+                                <div class="label">Description</div>
+                                <div class="desc">{(ticket.description or '')[:800].replace('\n','\n')}</div>
+                            </div>
+                            <div class="row">
+                                <div class="label">Created</div>
+                                <div class="value">{created}</div>
+                            </div>
+                        </div>
+                        <div class="actions">
+                            <form method="post" style="flex:1"> 
+                                <input type="hidden" name="first_name" value="{posted_fn}" />
+                                <input type="hidden" name="last_name" value="{posted_ln}" />
+                                <button class="btn" type="submit">Download PDF</button>
+                            </form>
+                            <a class="btn secondary" href="/">Close</a>
+                        </div>
+                    </div>
+                </body>
+                </html>
+                """
+                return HttpResponse(html)
 
     # generate PDF
     try:
         from reportlab.lib.pagesizes import letter
         from reportlab.pdfgen import canvas
+        from reportlab.lib import colors
+        from reportlab.lib.units import mm
         from io import BytesIO
 
         buffer = BytesIO()
         c = canvas.Canvas(buffer, pagesize=letter)
         width, height = letter
-        c.setFont("Helvetica-Bold", 14)
-        c.drawString(40, height - 80, f"Ticket Receipt #{ticket.ticket_number or ticket.id}")
-        c.setFont("Helvetica", 11)
-        c.drawString(40, height - 110, f"Name: {ticket.first_name} {ticket.last_name}")
-        c.drawString(40, height - 130, f"Issue: {ticket.title}")
-        text = c.beginText(40, height - 160)
-        text.setFont("Helvetica", 10)
-        for line in (ticket.description or "").splitlines():
-            text.textLine(line)
-        c.drawText(text)
-        c.drawString(40, 60, f"Created: {ticket.created_at}")
+
+        # Background and header (compact)
+        c.setFillColor(colors.HexColor('#0f172a'))
+        c.rect(0, height - 72, width, 72, fill=True, stroke=False)
+        c.setFillColor(colors.white)
+        c.setFont('Helvetica-Bold', 16)
+        c.drawString(40, height - 48, 'Chat Support System')
+
+        # status badge
+        status_text = 'Solved' if not ticket.is_open else 'Currently Solving'
+        status_color = colors.HexColor('#22c55e') if not ticket.is_open else colors.HexColor('#fb923c')
+        c.setFillColor(status_color)
+        c.roundRect(width - 160, height - 70, 120, 28, 8, fill=True, stroke=False)
+        c.setFillColor(colors.white)
+        c.setFont('Helvetica-Bold', 11)
+        c.drawCentredString(width - 100, height - 52, status_text)
+
+        # Ticket meta
+        c.setFillColor(colors.HexColor('#0f172a'))
+        c.setFont('Helvetica-Bold', 11)
+        c.drawString(40, height - 100, f'Ticket #{ticket.ticket_number or ticket.id}')
+        c.setFont('Helvetica', 9)
+        c.drawString(40, height - 114, f'Reported by: {ticket.first_name} {ticket.last_name}' + (f' ({ticket.user.username})' if getattr(ticket, 'user', None) else ''))
+        c.drawString(40, height - 128, f'Created: {ticket.created_at}')
+
+        # Issue + description (compact)
+        y = height - 150
+        c.setFont('Helvetica-Bold', 10)
+        c.drawString(40, y, 'Issue:')
+        c.setFont('Helvetica', 10)
+        c.drawString(90, y, (ticket.title or '')[:80])
+        y -= 16
+        c.setFont('Helvetica-Bold', 10)
+        c.drawString(40, y, 'Description:')
+        y -= 12
+        c.setFont('Helvetica', 9)
+        desc_text = (ticket.description or '')[:1000]
+        desc_lines = desc_text.splitlines() or ['']
+        for line in desc_lines:
+            if y < 60:
+                break
+            c.drawString(40, y, (line[:100]))
+            y -= 12
+
+        # Footer
+        if y < 80:
+            c.showPage()
+            y = height - 80
+        c.setFont('Helvetica', 9)
+        c.drawString(40, 40, 'Thank you for using Chat Support System')
+
         c.showPage()
         c.save()
         pdf = buffer.getvalue()
         buffer.close()
-        resp = HttpResponse(pdf, content_type="application/pdf")
-        resp["Content-Disposition"] = f'attachment; filename="ticket_{ticket.ticket_number or ticket.id}_receipt.pdf"'
+        resp = HttpResponse(pdf, content_type='application/pdf')
+        resp['Content-Disposition'] = f'attachment; filename="ticket_{ticket.ticket_number or ticket.id}_receipt.pdf"'
         return resp
     except Exception as e:
-        return Response({"error": "PDF generation failed", "detail": str(e)})
+        return Response({'error': 'PDF generation failed', 'detail': str(e)})
 
 
 class MessageCreateView(generics.CreateAPIView):
