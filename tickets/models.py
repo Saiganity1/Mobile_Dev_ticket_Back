@@ -4,6 +4,8 @@ import uuid
 
 class Ticket(models.Model):
     uid = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    # short, unique numeric ticket number for receipts and display
+    ticket_number = models.PositiveIntegerField(null=True, blank=True, unique=True, help_text='Short sequential ticket number')
     user = models.ForeignKey('auth.User', related_name='tickets', on_delete=models.SET_NULL, null=True, blank=True)
     assigned_to = models.ForeignKey('auth.User', related_name='assigned_tickets', on_delete=models.SET_NULL, null=True, blank=True)
     first_name = models.CharField(max_length=150)
@@ -21,6 +23,21 @@ class Ticket(models.Model):
 
     def __str__(self):
         return f"{self.title} ({self.uid})"
+
+    def save(self, *args, **kwargs):
+        # assign a sequential ticket_number if not set
+        creating = self.pk is None
+        super().save(*args, **kwargs)
+        if self.ticket_number is None:
+            # attempt to set ticket_number to max+1
+            try:
+                last = Ticket.objects.aggregate(models.Max('ticket_number'))['ticket_number__max'] or 0
+                self.ticket_number = last + 1
+                # save without recursing into this block again
+                Ticket.objects.filter(pk=self.pk).update(ticket_number=self.ticket_number)
+            except Exception:
+                # ignore and leave null; migration / manual fix may be needed
+                pass
 
 
 class Message(models.Model):

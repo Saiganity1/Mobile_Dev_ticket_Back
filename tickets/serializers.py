@@ -36,6 +36,7 @@ class AttachmentSerializer(serializers.ModelSerializer):
 
 
 class TicketSerializer(serializers.ModelSerializer):
+    ticket_number = serializers.IntegerField(source='id', read_only=True)
     messages = MessageSerializer(many=True, read_only=True)
     attachments = AttachmentSerializer(many=True, read_only=True)
     unread_count = serializers.SerializerMethodField()
@@ -47,7 +48,7 @@ class TicketSerializer(serializers.ModelSerializer):
     class Meta:
         model = Ticket
         fields = (
-            'id', 'uid', 'first_name', 'last_name', 'title', 'description', 'attachments', 'created_at', 'is_open', 'messages', 'unread_count',
+            'id', 'ticket_number', 'uid', 'first_name', 'last_name', 'title', 'description', 'attachments', 'created_at', 'is_open', 'messages', 'unread_count',
             'closed_by', 'closed_at', 'reopened_by', 'reopened_at'
         )
         read_only_fields = ('id', 'uid', 'created_at', 'is_open', 'closed_by', 'closed_at', 'reopened_by', 'reopened_at')
