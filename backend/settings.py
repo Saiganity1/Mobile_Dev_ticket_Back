@@ -7,7 +7,7 @@ SECRET_KEY = 'replace-this-with-secure-key'
 
 DEBUG = True
 
-ALLOWED_HOSTS = ['http://127.0.0.1:8000/', 'localhost', "127.0.0.1"]
+ALLOWED_HOSTS = ['http://127.0.0.1:8000/', 'localhost', "127.0.0.1", "https://snack.expo.dev/@suiseich/b8be85", "snack.expo.dev/@suiseich/b8be85", "https://mobile-dev-ticket-back-2.onrender.com", "mobile-dev-ticket-back-2.onrender.com"]
 
 INSTALLED_APPS = [
     'django.contrib.admin',
