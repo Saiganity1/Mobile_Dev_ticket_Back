@@ -30,7 +30,12 @@ def register(request):
     serializer.is_valid(raise_exception=True)
     user = serializer.save()
     token, _ = Token.objects.get_or_create(user=user)
-    return Response({"token": token.key, "username": user.username, "user_id": user.id})
+    return Response({
+        "token": token.key,
+        "username": user.username,
+        "user_id": user.id,
+        "is_admin": bool(user.is_staff or user.is_superuser)
+    })
 
 
 @api_view(["POST"])
@@ -45,14 +50,25 @@ def login(request):
     if not user.check_password(password):
         return Response({"detail": "Invalid credentials"}, status=status.HTTP_400_BAD_REQUEST)
     token, _ = Token.objects.get_or_create(user=user)
-    return Response({"token": token.key, "username": user.username, "user_id": user.id})
+    return Response({
+        "token": token.key,
+        "username": user.username,
+        "user_id": user.id,
+        "is_admin": bool(user.is_staff or user.is_superuser)
+    })
 
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def me(request):
     u = request.user
-    return Response({"id": u.id, "username": u.username, "is_staff": u.is_staff})
+    return Response({
+        "id": u.id,
+        "username": u.username,
+        "is_staff": u.is_staff,
+        "is_superuser": u.is_superuser,
+        "is_admin": bool(u.is_staff or u.is_superuser)
+    })
 
 
 class TicketCreateView(generics.CreateAPIView):
